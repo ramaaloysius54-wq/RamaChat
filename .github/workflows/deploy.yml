@@ -1,82 +1,53 @@
-name: CI/CD Pipeline Rama DevOps (RamaChat & K8s Pod)
+name: CI/CD Pipeline Rama DevOps
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      build_apk_manual:
-        description: 'Centang untuk Build APK Android secara manual'
-        required: false
-        default: 'false'
 
 jobs:
-  test-and-verify:
-    name: 🧪 Test Syntax & Verify Backend
+  deploy-to-vps:
+    name: Sync & Deploy to VPS
     runs-on: ubuntu-latest
-    steps:
-      - name: 📥 Checkout Repository
-        uses: actions/checkout@v4
-      - name: 🐍 Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - name: 📦 Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pillow python-dotenv httpx pytest
-      - name: 🎨 Generate Assets & Check Syntax
-        run: |
-          python3 scripts/generate_assets.py
-          python3 scripts/check_project.py
-      - name: ✅ Run Unit Tests
-        env:
-          SUPABASE_URL: https://wmauyurhlwodusqnbkcv.supabase.co
-          SUPABASE_ANON_KEY: sb_publishable_eZ7Tdo4P-oW10lvImVUJbA_QJlYNNke
-        run: |
-          pytest -v
-          python3 test_supabase.py
 
-  build-and-deploy:
-    name: 🚀 Sync & Deploy Pod to VPS
-    needs: test-and-verify
-    runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
-      - name: 🚀 Sync to VPS
+
+      - name: 🚀 Sync & Deploy via SSH/Rsync
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass rsync
-          sshpass -e ssh -o StrictHostKeyChecking=no -p 22 "$VPS_USER@$VPS_HOST" "mkdir -p /var/www/aplication"
+
+          echo "1. Sinkronisasi file ke VPS (/var/www/aplication)..."
           sshpass -e rsync -avz --delete \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.env' \
             --exclude='.buildozer' \
             --exclude='bin' \
-            -e "ssh -o StrictHostKeyChecking=no -p 22" \
+            -e "ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22" \
             ./ "$VPS_USER@$VPS_HOST:/var/www/aplication/"
 
-  manual-apk-build:
-    name: 📱 Build Android APK (Official Container)
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_apk_manual == 'true'
-    needs: test-and-verify
-    runs-on: ubuntu-22.04
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-      - name: 🔨 Build APK with Official Buildozer Container
-        uses: kivy/buildozer-action@main
-        id: buildozer
-        with:
-          command: buildozer android debug
-      - name: 📤 Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RamaChat-debug-apk
-          path: bin/*.apk
+          echo "2. Menjalankan Docker & Kubernetes Deployment di VPS..."
+          sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22 "$VPS_USER@$VPS_HOST" << 'ENDSSH'
+            cd /var/www/aplication
+            
+            # Build ulang image Docker untuk Pod OTP di port 4040
+            docker build -t ramachat-otp-server:latest .
+            
+            # Jika pakai K3s
+            if command -v k3s &> /dev/null; then
+              docker save ramachat-otp-server:latest | sudo k3s ctr images import - || true
+            fi
+
+            # Terapkan manifes K8s ke namespace default
+            kubectl apply -f k8s/deployment.yaml
+            kubectl apply -f k8s/service.yaml
+            kubectl rollout restart deployment/ramachat-otp-server || true
+            
+            kubectl get pods
+          ENDSSH
