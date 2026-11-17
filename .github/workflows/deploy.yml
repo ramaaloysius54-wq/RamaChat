@@ -12,33 +12,25 @@ on:
         default: 'false'
 
 jobs:
-  # ----------------------------------------------------------------------------
-  # JOB 1: AUTOMATED TEST & VERIFICATION DI GITHUB ACTIONS
-  # ----------------------------------------------------------------------------
   test-and-verify:
-    name: 🧪 Test Syntax, Pytest & Verify Backend
+    name: 🧪 Test Syntax & Verify Backend
     runs-on: ubuntu-latest
-
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
-
-      - name: 🐍 Setup Python 3.11
+      - name: 🐍 Setup Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: 📦 Install Test Dependencies
+          python-version: "3.10"
+      - name: 📦 Install Dependencies
         run: |
           pip install --upgrade pip
           pip install pillow python-dotenv httpx pytest
-
-      - name: 🎨 Generate App Assets & Check Python Syntax
+      - name: 🎨 Generate Assets & Check Syntax
         run: |
           python3 scripts/generate_assets.py
           python3 scripts/check_project.py
-
-      - name: ✅ Run Unit Tests (Pytest) & Backend Config Verification
+      - name: ✅ Run Unit Tests
         env:
           SUPABASE_URL: https://wmauyurhlwodusqnbkcv.supabase.co
           SUPABASE_ANON_KEY: sb_publishable_eZ7Tdo4P-oW10lvImVUJbA_QJlYNNke
@@ -46,106 +38,43 @@ jobs:
           pytest -v
           python3 test_supabase.py
 
-  # ----------------------------------------------------------------------------
-  # JOB 2: SYNC KE VPS (/var/www/aplication) & DEPLOY POD K8S / ARGOCD
-  #        (Hanya berjalan apabila Job 1 lulus 100% tanpa error)
-  # ----------------------------------------------------------------------------
   build-and-deploy:
-    name: 🚀 Sync & Build Pod di VPS (/var/www/aplication)
+    name: 🚀 Sync & Deploy Pod to VPS
     needs: test-and-verify
     runs-on: ubuntu-latest
-
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
-
-      - name: 🚀 Sync & Build di VPS (/var/www/aplication)
+      - name: 🚀 Sync to VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass rsync
-
-          echo "0. Memastikan direktori /var/www/aplication tersedia di VPS..."
-          sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22 "$VPS_USER@$VPS_HOST" "mkdir -p /var/www/aplication"
-
-          echo "1. Mengirim file terbaru ke VPS (/var/www/aplication)..."
+          sshpass -e ssh -o StrictHostKeyChecking=no -p 22 "$VPS_USER@$VPS_HOST" "mkdir -p /var/www/aplication"
           sshpass -e rsync -avz --delete \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.env' \
             --exclude='.buildozer' \
             --exclude='bin' \
-            --exclude='baileys_auth_info' \
-            -e "ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22" \
+            -e "ssh -o StrictHostKeyChecking=no -p 22" \
             ./ "$VPS_USER@$VPS_HOST:/var/www/aplication/"
 
-          echo "2. Build Container Image & Deploy Pod Kubernetes + ArgoCD di VPS..."
-          sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22 "$VPS_USER@$VPS_HOST" << 'ENDSSH'
-            set -e
-            cd /var/www/aplication
-
-            echo "--> Memeriksa syntax project di VPS..."
-            python3 scripts/check_project.py
-
-            echo "--> Membangun Docker Image untuk Pod OTP Verification Server..."
-            if command -v docker &> /dev/null; then
-              docker build -t ramachat-otp-server:latest .
-              # Jika VPS menggunakan K3s, import image langsung ke containerd K3s
-              if command -v k3s &> /dev/null; then
-                docker save ramachat-otp-server:latest | sudo k3s ctr images import -
-              fi
-            fi
-
-            echo "--> Menerapkan Manifes Pod Kubernetes & ArgoCD..."
-            if command -v kubectl &> /dev/null; then
-              kubectl apply -f k8s/namespace.yaml
-              kubectl apply -f k8s/deployment.yaml
-              kubectl apply -f k8s/service.yaml
-              kubectl rollout restart deployment/ramachat-otp-server -n ramachat
-              kubectl get pods -n ramachat
-              # Terapkan ArgoCD Application jika namespace argocd tersedia
-              if kubectl get ns argocd &> /dev/null; then
-                kubectl apply -f k8s/argocd-application.yaml || true
-              fi
-            fi
-
-            echo "--> Deployment ke /var/www/aplication & Pod Kubernetes Selesai!"
-          ENDSSH
-
-    # ----------------------------------------------------------------------------
-  # JOB 3: MANUAL APK BUILD (NATIVE UBUNTU RUNNER)
-  # ----------------------------------------------------------------------------
   manual-apk-build:
-    name: 📱 Manual Build Android APK
+    name: 📱 Build Android APK (Official Container)
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_apk_manual == 'true'
     needs: test-and-verify
     runs-on: ubuntu-22.04
-
     steps:
-      - name: 📥 Checkout Repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-
-      - name: 🐍 Setup Python 3.11
-        uses: actions/setup-python@v5
+      - name: 🔨 Build APK with Official Buildozer Container
+        uses: kivy/buildozer-action@main
+        id: buildozer
         with:
-          python-version: "3.11"
-
-      - name: 📦 Install System Dependencies & Buildozer
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36 virtualenv
-
-      - name: 🎨 Generate Assets
-        run: python3 scripts/generate_assets.py
-
-      - name: 🔨 Build Debug APK
-        run: |
-          yes | buildozer android debug
-
+          command: buildozer android debug
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
