@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ramachat-otp-server
+  namespace: ramachat
+  labels:
+    app: ramachat-otp-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ramachat-otp-server
+  template:
+    metadata:
+      labels:
+        app: ramachat-otp-server
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: otp-verification-api
+          image: ramachat-otp-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4040
+          env:
+            - name: PORT
+              value: "4040"
+            - name: SUPABASE_URL
+              value: "https://wmauyurhlwodusqnbkcv.supabase.co"
+            - name: SUPABASE_ANON_KEY
+              value: "sb_publishable_eZ7Tdo4P-oW10lvImVUJbA_QJlYNNke"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 4040
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 4040
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
