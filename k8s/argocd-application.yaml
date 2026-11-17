@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/USERNAME_ANDA/RamaChat.git
+    repoURL: https://github.com/ramaaloysius54-wq/RamaChat.git
     targetRevision: main
     path: k8s
   destination:
