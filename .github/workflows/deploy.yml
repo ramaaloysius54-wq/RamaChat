@@ -22,7 +22,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass rsync
 
-          echo "1. Sinkronisasi file ke VPS (/var/www/aplication)..."
+          echo "1. Sinkronisasi file ke VPS..."
+          sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22 "$VPS_USER@$VPS_HOST" "mkdir -p /var/www/aplication"
+          
           sshpass -e rsync -avz --delete \
             --exclude='.git' \
             --exclude='node_modules' \
@@ -32,22 +34,15 @@ jobs:
             -e "ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22" \
             ./ "$VPS_USER@$VPS_HOST:/var/www/aplication/"
 
-          echo "2. Menjalankan Docker & Kubernetes Deployment di VPS..."
+          echo "2. Menjalankan Docker & Kubernetes Deployment..."
           sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -p 22 "$VPS_USER@$VPS_HOST" << 'ENDSSH'
             cd /var/www/aplication
-            
-            # Build ulang image Docker untuk Pod OTP di port 4040
             docker build -t ramachat-otp-server:latest .
-            
-            # Jika pakai K3s
             if command -v k3s &> /dev/null; then
               docker save ramachat-otp-server:latest | sudo k3s ctr images import - || true
             fi
-
-            # Terapkan manifes K8s ke namespace default
             kubectl apply -f k8s/deployment.yaml
             kubectl apply -f k8s/service.yaml
             kubectl rollout restart deployment/ramachat-otp-server || true
-            
             kubectl get pods
           ENDSSH
