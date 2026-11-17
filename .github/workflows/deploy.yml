@@ -114,8 +114,8 @@ jobs:
             echo "--> Deployment ke /var/www/aplication & Pod Kubernetes Selesai!"
           ENDSSH
 
-  # ----------------------------------------------------------------------------
-  # JOB 3: MANUAL APK BUILD (Hanya jalan jika di-trigger manual dari GitHub)
+    # ----------------------------------------------------------------------------
+  # JOB 3: MANUAL APK BUILD (NATIVE UBUNTU RUNNER)
   # ----------------------------------------------------------------------------
   manual-apk-build:
     name: 📱 Manual Build Android APK
@@ -127,18 +127,27 @@ jobs:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install System Dependencies & Buildozer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          pip install --upgrade pip
+          pip install buildozer cython==0.29.36 virtualenv
+
       - name: 🎨 Generate Assets
         run: python3 scripts/generate_assets.py
 
-      - name: 🔨 Build Debug APK with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          command: buildozer android debug
-          buildozer_version: stable
+      - name: 🔨 Build Debug APK
+        run: |
+          yes | buildozer android debug
 
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: RamaChat-debug-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
